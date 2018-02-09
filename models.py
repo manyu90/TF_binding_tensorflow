@@ -12,7 +12,7 @@ from keras.layers import (
     Activation, AveragePooling1D, BatchNormalization,
     Conv1D, Dense, Dropout, Flatten, Input,
     MaxPooling1D, Merge, Permute, Reshape,
-    PReLU
+    PReLU, Multiply, Lambda
 )
 from keras.models import Model
 
@@ -272,13 +272,30 @@ class SequenceMethylationRevCompClassifier(Classifier):
         
         seq_preds=self.inputs["data/genome_data_dir"]
         methylation_preds=self.inputs["data/methylation_data_dir"]
+        
+        def reverse_comp(x):
+        	return K.reverse(K.reverse(x,axes=-1),axes=-2)
+        def reverse(x):
+        	return K.reverse(x,axes=-2)	
+        def get_C_locations(x):
+        	return K.expand_dims(x[:,:,1],axis=-1)
+        
+        reverse_comp_seq = Lambda(reverse_comp)(seq_preds)
+        reverse_methylation = Lambda(reverse)(methylation_preds)
+        C_locations_forward_strand = Lambda(get_C_locations)(seq_preds)
+        C_locations_reverse_strand = Lambda(get_C_locations)(reverse_comp_seq)
+        forward_methylation_masked = Multiply()([methylation_preds,C_locations_forward_strand])  #Using the mask that is C
+        reverse_methylation_masked = Multiply()([reverse_methylation,C_locations_reverse_strand])  #Using the reverse comp mask on C
 
-        reverse_comp_seq=K.reverse(K.reverse(seq_preds,axes=-1),axes=-2)
-        reverse_methylation=K.reverse(methylation_preds,axes=-2)
-        C_locations_forward_strand=K.expand_dims(seq_preds[:,:,1],dim=-1)  #Remember the order A:0,C:1,G:2,T:3
-        C_locations_reverse_strand=K.expand_dims(reverse_comp_seq[:,:,1],dim=-1)
-        forward_methylation_masked=methylation_preds*C_locations_forward_strand   #Using the mask that is C
-        reverse_methylation_masked=reverse_methylation*C_locations_reverse_strand  #Using the reverse comp mask on C
+
+
+
+        # reverse_comp_seq=K.reverse(K.reverse(seq_preds,axes=-1),axes=-2)
+        # reverse_methylation=K.reverse(methylation_preds,axes=-2)
+        # C_locations_forward_strand=K.expand_dims(seq_preds[:,:,1],axis=-1)  #Remember the order A:0,C:1,G:2,T:3
+        # C_locations_reverse_strand=K.expand_dims(reverse_comp_seq[:,:,1],axis=-1)
+        # forward_methylation_masked=Multiply()([methylation_preds,C_locations_forward_strand])  #Using the mask that is C
+        # reverse_methylation_masked=Multiply()([reverse_methylation,C_locations_reverse_strand])  #Using the reverse comp mask on C
 
         logits = Merge(mode='concat', concat_axis=2)([seq_preds,forward_methylation_masked,reverse_comp_seq,reverse_methylation_masked])
  
@@ -313,7 +330,7 @@ class SequenceMethylationRevCompClassifier(Classifier):
         logits = Dense(num_tasks)(logits)
         self.logits=logits
         preds = Activation('sigmoid')(self.logits)
-        self.model = Model(inputs=self.inputs.values(), outputs=preds)
+        self.model = Model(inputs=[seq_preds,forward_methylation_masked,reverse_comp_seq,reverse_methylation_masked], outputs=preds)
 
     
     def get_logits(self):

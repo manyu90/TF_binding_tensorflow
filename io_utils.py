@@ -1,5 +1,6 @@
 from profilehooks import profile
 from itertools import cycle,izip
+import numpy as np
 
 
 def batch_iterator(iterable,batch_size=128):
@@ -41,9 +42,9 @@ def generate_from_intervals(intervals, data_extractors_dict, batch_size=128, ind
     "data/methylation_data_dir":(batch_size,1000,1)}
     
     if indefinitely:
-        batch_iterator = infinite_batch_iter(intervals, batch_size)
+        batch_iterator_generator = infinite_batch_iter(intervals, batch_size)
     else:
-        batch_iterator = batch_iter(intervals, batch_size)
+        batch_iterator_generator = batch_iterator(intervals, batch_size)
     
     
     
@@ -56,7 +57,7 @@ def generate_from_intervals(intervals, data_extractors_dict, batch_size=128, ind
         
         
             
-    for batch in batch_iterator:
+    for batch in batch_iterator_generator:
         try:
             for key in data_extractors_dict:
                 data_dict[key][:]=data_extractors_dict[key](batch).reshape(shapes_dict[key])
@@ -65,8 +66,11 @@ def generate_from_intervals(intervals, data_extractors_dict, batch_size=128, ind
             
         except ValueError:
             for key in data_extractors_dict:
+                # import  IPython
+                # IPython.embed()
                 data=data_extractors_dict[key](batch)
-                print (key,data.shape)
+                #print (key,data.shape)
+
                 data_dict[key] = data_extractors_dict[key](batch).reshape((data.shape[0],shapes_dict[key][1],shapes_dict[key][2]))
             yield data_dict    
 
@@ -139,6 +143,11 @@ def get_fixed_number_of_intervals(intervals_bedtool,num_batches,batch_procesing_
 
 def generate_from_intervals_and_labels(intervals,labels,data_extractors_dict, batch_size=128, indefinitely=True):
     """
+    intervals: BedTool list of a set of genomic intervals 
+    labels: np.array
+    data_extractors_dict: dict of data type to genomelake extractor object for that kind of data 
+    for example: {'data/genome_data_dir':ArrayExtractor(genome_path)}
+
     Generates batches of (inputs, labels) where inputs is a list of numpy arrays based on provided extractors.
     """
     batch_generator = izip(generate_from_intervals(intervals,data_extractors_dict,

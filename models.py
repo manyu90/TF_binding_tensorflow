@@ -272,7 +272,7 @@ class SequenceMethylationRevCompClassifier(Classifier):
         
         seq_preds=self.inputs["data/genome_data_dir"]
         methylation_preds=self.inputs["data/methylation_data_dir"]
-        
+
         def reverse_comp(x):
         	return K.reverse(K.reverse(x,axes=-1),axes=-2)
         def reverse(x):
@@ -330,7 +330,7 @@ class SequenceMethylationRevCompClassifier(Classifier):
         logits = Dense(num_tasks)(logits)
         self.logits=logits
         preds = Activation('sigmoid')(self.logits)
-        self.model = Model(inputs=[seq_preds,forward_methylation_masked,reverse_comp_seq,reverse_methylation_masked], outputs=preds)
+        self.model = Model(inputs=[seq_preds,methylation_preds], outputs=preds)
 
     
     def get_logits(self):

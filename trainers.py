@@ -59,7 +59,7 @@ class ClassifierTrainer(object):
     def __init__(self,train_validation_dict,extractors_dict,logdir,batch_size=128,
                  epoch_size=10000, num_epochs=10,
                  early_stopping_metric='auPRC', early_stopping_patience=1,
-                 logger=None,save_best_model_prefix='SeqDnaseModel'):
+                 logger=None,save_best_model_prefix='SeqDnaseModel',visiblegpus='1'):
         
         self.logdir=logdir
         self.batch_size = batch_size
@@ -79,7 +79,7 @@ class ClassifierTrainer(object):
         self.extractors_dict=extractors_dict
         self.save_best_model_prefix=save_best_model_prefix
         ##Define tensorflow session
-        self.sess=create_tensorflow_session(visiblegpus='1')
+        self.sess=create_tensorflow_session(visiblegpus=visiblegpus)
 
 
     def predict_on_batch(self,batch_data_dict):

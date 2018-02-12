@@ -14,6 +14,8 @@ from keras.utils.generic_utils import Progbar
 import logging
 from models import *
 from sklearn import metrics
+from metrics import *
+
 
 
 
@@ -138,8 +140,10 @@ class ClassifierTrainer(object):
         for epoch in xrange(self.num_epochs):
 
             validation_preds = self.predict_on_intervals(self.validation_intervals_bedtool, self.extractors_dict)
-            val_auc_roc = metrics.roc_auc_score(self.validation_labels,validation_preds)
-            print("Validation_auc_roc %s"%(str(val_auc_roc)))
+            validation_metrics=ClassificationResult(labels=self.validation_labels,predictions=validation_preds)
+            #val_auc_roc = metrics.roc_auc_score(self.validation_labels,validation_preds)
+
+            print(validation_metrics)
             for batch_indx in range(1,self.batches_per_epoch+1):
                 data_dict, labels_batch  = next(batch_generator)
                 #print labels_batch.shape

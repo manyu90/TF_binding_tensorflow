@@ -58,9 +58,10 @@ class ClassifierTrainer(object):
 
     def __init__(self,train_validation_dict,extractors_dict,logdir,batch_size=128,
                  epoch_size=10000, num_epochs=10,
-                 early_stopping_metric='auPRC', early_stopping_patience=5,
-                 logger=None):
+                 early_stopping_metric='auPRC', early_stopping_patience=1,
+                 logger=None,save_best_model_prefix='SeqDnaseModel'):
         
+        self.logdir=logdir
         self.batch_size = batch_size
         self.epoch_size = epoch_size
         self.batches_per_epoch=int(self.epoch_size /self.batch_size) + 1
@@ -76,6 +77,7 @@ class ClassifierTrainer(object):
         self.validation_labels=np.load(train_validation_dict['validation_labels'])
         self.Model=SequenceDNAseClassifier()
         self.extractors_dict=extractors_dict
+        self.save_best_model_prefix=save_best_model_prefix
         ##Define tensorflow session
         self.sess=create_tensorflow_session(visiblegpus='1')
 
@@ -122,7 +124,7 @@ class ClassifierTrainer(object):
         ###Create Tensorflow Graph
         self.logits=self.Model.get_logits()
         labels_placeholder=tf.placeholder(tf.float32,shape=(None,1))
-        self.loss_op=cross_entropy_loss(labels_placeholder,self.logits)
+        self.loss_op=focal_loss(labels_placeholder,self.logits)
         self.optimizer=tf.train.AdamOptimizer(learning_rate=.0003)
         self.train_op=self.optimizer.minimize(self.loss_op)
 
@@ -134,24 +136,35 @@ class ClassifierTrainer(object):
 
         ##Define the data types to extractor dictionary
         ##Start the train loop
+        validation_metrics_per_epoch = []
+        current_best_metric = -np.inf 
         progbar=Progbar(target=self.epoch_size)
         batch_generator = generate_from_intervals_and_labels(intervals=self.train_intervals_bedtool ,labels=self.train_labels, data_extractors_dict=self.extractors_dict)
         
         for epoch in xrange(self.num_epochs):
 
             validation_preds = self.predict_on_intervals(self.validation_intervals_bedtool, self.extractors_dict)
-            validation_metrics=ClassificationResult(labels=self.validation_labels,predictions=validation_preds)
-            #val_auc_roc = metrics.roc_auc_score(self.validation_labels,validation_preds)
+            validation_metrics = ClassificationResult(labels=self.validation_labels,predictions=validation_preds)
+            current_metric_of_consideration = validation_metrics.results[self.early_stopping_metric]
+            if current_metric_of_consideration > current_best_metric:
+                current_best_metric=current_metric_of_consideration
+                best_epoch = epoch
+                early_stopping_wait = 0
+                print("Found new best model. Saving weights to %s \n"%(self.logdir))
+                self.Model.save(os.path.join(self.logdir,self.save_best_model_prefix))
+            else :
+                if early_stopping_wait >= self.early_stopping_patience:
+                    break
+                early_stopping_wait += 1
+                    
+            
 
             print(validation_metrics)
             for batch_indx in range(1,self.batches_per_epoch+1):
                 data_dict, labels_batch  = next(batch_generator)
-                #print labels_batch.shape
+                
                 feed_dict={seq_placeholder:data_dict['data/genome_data_dir'],dnase_placeholder:data_dict['data/dnase_data_dir'],labels_placeholder:labels_batch}
                 logits_,loss_,_=self.sess.run([self.logits,self.loss_op,self.train_op],feed_dict=feed_dict)
-        #         if batch_indx%10==0:
-        #             print("AUC is %s"%(str(metrics.roc_auc_score(y_true=labels_batch,y_score=logits_))))
-                    
                 start = (batch_indx-1)*self.batch_size
                 stop = batch_indx*self.batch_size
                 if stop > self.epoch_size:
@@ -159,6 +172,11 @@ class ClassifierTrainer(object):
                 progbar.update(stop)    
             print("Finished epoch %s"%(str(epoch)))     
           
+        print("Finished training after {} epochs \n".format(epoch))
+        if self.save_best_model_prefix is not None:
+                print("The best model's architecture and weights (from epoch {0}) "
+                                 'were saved to {1}.arch.json and {1}.weights.h5'.format(
+                                     best_epoch, self.save_best_model_prefix))
 
 
 

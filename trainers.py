@@ -31,7 +31,11 @@ def create_tensorflow_session(visiblegpus):
     return session
 
 
-
+def setup_logger(logger_name, log_file, level=logging.INFO):
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(level)
+    file_handler = logging.FileHandler(log_file, mode='w')
+    logger.addHandler(file_handler)
 
 
 
@@ -80,6 +84,19 @@ class ClassifierTrainer(object):
         self.save_best_model_prefix=save_best_model_prefix
         ##Define tensorflow session
         self.sess=create_tensorflow_session(visiblegpus=visiblegpus)
+
+        self.logger.info('Train File: {}'.format(self.train_intervals_file))
+        self.logger.info('Train Labels: {}'.format(train_validation_dict['train_labels']))
+        self.logger.info('Validation File: {}'.format(self.validation_intervals_file))
+        self.logger.info('Validation Labels: {}'.format(train_validation_dict['validation_labels']))
+        self.logger.info('logdir: {}'.format(self.logdir))
+        self.logger.info('early_stopping_metric: {}'.format(self.early_stopping_metric))
+        self.logger.info('early_stopping_patience: {}'.format(self.early_stopping_patience))
+        self.logger.info('batch_size: {}'.format(self.batch_size))
+        self.logger.info('Epoch Size: {}'.format(self.epoch_size))
+        self.logger.info('Model Tyep: {}'.format(self.Model.__class__.__name__))
+        
+
 
 
     def predict_on_batch(self,batch_data_dict):
@@ -136,12 +153,25 @@ class ClassifierTrainer(object):
 
         ##Define the data types to extractor dictionary
         ##Start the train loop
-        validation_metrics_per_epoch = []
+        
         current_best_metric = -np.inf 
         progbar=Progbar(target=self.epoch_size)
         batch_generator = generate_from_intervals_and_labels(intervals=self.train_intervals_bedtool ,labels=self.train_labels, data_extractors_dict=self.extractors_dict)
         
         for epoch in xrange(self.num_epochs):
+
+    
+            for batch_indx in range(1,self.batches_per_epoch+1):
+                data_dict, labels_batch  = next(batch_generator)
+                
+                feed_dict={seq_placeholder:data_dict['data/genome_data_dir'],dnase_placeholder:data_dict['data/dnase_data_dir'],labels_placeholder:labels_batch}
+                self.sess.run(self.train_op,feed_dict=feed_dict)
+                start = (batch_indx-1)*self.batch_size
+                stop = batch_indx*self.batch_size
+                if stop > self.epoch_size:
+                    stop = self.epoch_size
+                progbar.update(stop)    
+            print("Finished epoch %s"%(str(epoch))) 
 
             validation_preds = self.predict_on_intervals(self.validation_intervals_bedtool, self.extractors_dict)
             validation_metrics = ClassificationResult(labels=self.validation_labels,predictions=validation_preds)
@@ -160,17 +190,7 @@ class ClassifierTrainer(object):
             
 
             print(validation_metrics)
-            for batch_indx in range(1,self.batches_per_epoch+1):
-                data_dict, labels_batch  = next(batch_generator)
-                
-                feed_dict={seq_placeholder:data_dict['data/genome_data_dir'],dnase_placeholder:data_dict['data/dnase_data_dir'],labels_placeholder:labels_batch}
-                logits_,loss_,_=self.sess.run([self.logits,self.loss_op,self.train_op],feed_dict=feed_dict)
-                start = (batch_indx-1)*self.batch_size
-                stop = batch_indx*self.batch_size
-                if stop > self.epoch_size:
-                    stop = self.epoch_size
-                progbar.update(stop)    
-            print("Finished epoch %s"%(str(epoch)))     
+
           
         print("Finished training after {} epochs \n".format(epoch))
         if self.save_best_model_prefix is not None:
@@ -225,12 +245,22 @@ if __name__ == '__main__':
     extractors_dict={'data/genome_data_dir':genome_extractor,'data/dnase_data_dir':dnase_extractor}
 
     ##Create the logdir for saving models
-    logdir ='./logdir_SeqDnase_CEBPB_CEloss'
-    if not os.path.exists(logdir):
-        os.mkdir(logdir)
+    logdir ='./logdir_SeqDnase_ZBTB33'
 
+    logdir=os.path.abspath(logdir)
+    assert(not os.path.exists(logdir))
+    os.makedirs(logdir)
+
+    setup_logger('train_logger',os.path.join(logdir,'metrics.log'))
+    logger=logging.getLogger('train_logger')
+
+    train_intervals_file_dnase_regions='/srv/scratch/manyu/TF_binding_tensorflow/data/train_intervals.bed'
+    train_intervals_file_dnase_regions_labels='/srv/scratch/manyu/TF_binding_tensorflow/data/train_labels.npy'
+    validation_intervals_file_dnase_regions='/srv/scratch/manyu/TF_binding_tensorflow/data/validation_intervals.bed'
+    validation_intervals_file_dnase_regions_labels='/srv/scratch/manyu/TF_binding_tensorflow/data/validation_labels.npy'
+    train_validation_dict_dnase={'train_data':train_intervals_file_dnase_regions,'train_labels':train_intervals_file_dnase_regions_labels,'validation_data':validation_intervals_file_dnase_regions,'validation_labels':validation_intervals_file_dnase_regions_labels}
         
-    Trainer=ClassifierTrainer(train_validation_dict,extractors_dict,logdir)
+    Trainer=ClassifierTrainer(train_validation_dict_dnase,extractors_dict,logdir,logger=logger)
     Trainer.train()
 
 
@@ -240,6 +270,7 @@ if __name__ == '__main__':
 
     #test_validation_intervals=[validation_intervals[i] for i in range(1000)]
     #train_validation_dict={'train_data':train_inter}
+    
 
         
     

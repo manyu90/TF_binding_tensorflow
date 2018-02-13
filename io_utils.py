@@ -25,7 +25,7 @@ def infinite_batch_iter(iterable, batch_size=128):
 
 
 
-@profile
+
 def generate_from_intervals(intervals, data_extractors_dict, batch_size=128, indefinitely=True):
     """
     Generates signals extracted on interval batches.

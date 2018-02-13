@@ -61,8 +61,8 @@ def focal_loss(y_true,logits):
 class ClassifierTrainer(object):
 
     def __init__(self,train_validation_dict,extractors_dict,logdir,batch_size=128,
-                 epoch_size=10000, num_epochs=10,
-                 early_stopping_metric='auPRC', early_stopping_patience=1,
+                 epoch_size=100000, num_epochs=100,
+                 early_stopping_metric='auPRC', early_stopping_patience=5,
                  logger=None,save_best_model_prefix='SeqDnaseModel',visiblegpus='1'):
         
         self.logdir=logdir
@@ -85,6 +85,8 @@ class ClassifierTrainer(object):
         ##Define tensorflow session
         self.sess=create_tensorflow_session(visiblegpus=visiblegpus)
 
+        ##Create some basic information logging about the training 
+
         self.logger.info('Train File: {}'.format(self.train_intervals_file))
         self.logger.info('Train Labels: {}'.format(train_validation_dict['train_labels']))
         self.logger.info('Validation File: {}'.format(self.validation_intervals_file))
@@ -94,7 +96,8 @@ class ClassifierTrainer(object):
         self.logger.info('early_stopping_patience: {}'.format(self.early_stopping_patience))
         self.logger.info('batch_size: {}'.format(self.batch_size))
         self.logger.info('Epoch Size: {}'.format(self.epoch_size))
-        self.logger.info('Model Tyep: {}'.format(self.Model.__class__.__name__))
+        self.logger.info('Model Type: {}'.format(self.Model.__class__.__name__))
+
         
 
 
@@ -130,7 +133,7 @@ class ClassifierTrainer(object):
  
 
 
-    def train(self):
+    def train(self,learning_rate=.0003):
         """
             The input placeholders for the data get created here as they are imported from models
             They are global variables in the models
@@ -142,10 +145,13 @@ class ClassifierTrainer(object):
         self.logits=self.Model.get_logits()
         labels_placeholder=tf.placeholder(tf.float32,shape=(None,1))
         self.loss_op=focal_loss(labels_placeholder,self.logits)
-        self.optimizer=tf.train.AdamOptimizer(learning_rate=.0003)
+        self.optimizer=tf.train.AdamOptimizer(learning_rate=learning_rate)
         self.train_op=self.optimizer.minimize(self.loss_op)
 
-        
+        ##Loggint the optimizer information
+        self.logger.info('optimizer: {}'.format(self.optimizer.__class__.__name__))
+        self.logger.info('learning_rate: {}'.format(str(learning_rate)))
+
         ###Initialize all global variables
         init_op=tf.global_variables_initializer()
         self.sess.run(init_op)
@@ -157,7 +163,8 @@ class ClassifierTrainer(object):
         current_best_metric = -np.inf 
         progbar=Progbar(target=self.epoch_size)
         batch_generator = generate_from_intervals_and_labels(intervals=self.train_intervals_bedtool ,labels=self.train_labels, data_extractors_dict=self.extractors_dict)
-        
+        print("Starting to Train model \n")
+        logger.info("\nStarting to Train model \n")
         for epoch in xrange(self.num_epochs):
 
     
@@ -172,6 +179,7 @@ class ClassifierTrainer(object):
                     stop = self.epoch_size
                 progbar.update(stop)    
             print("Finished epoch %s"%(str(epoch))) 
+            logger.info('Finished epoch: {}'.format(str(epoch)))
 
             validation_preds = self.predict_on_intervals(self.validation_intervals_bedtool, self.extractors_dict)
             validation_metrics = ClassificationResult(labels=self.validation_labels,predictions=validation_preds)
@@ -181,6 +189,7 @@ class ClassifierTrainer(object):
                 best_epoch = epoch
                 early_stopping_wait = 0
                 print("Found new best model. Saving weights to %s \n"%(self.logdir))
+                logger.info("Found new best model. Saving weights to {} ".format(os.path.join(self.logdir,self.save_best_model_prefix+'.weights.h5')))
                 self.Model.save(os.path.join(self.logdir,self.save_best_model_prefix))
             else :
                 if early_stopping_wait >= self.early_stopping_patience:
@@ -190,14 +199,22 @@ class ClassifierTrainer(object):
             
 
             print(validation_metrics)
+            logger.info(str(validation_metrics))
+            logger.info('\n\n\n')
+
 
           
         print("Finished training after {} epochs \n".format(epoch))
+        logger.info("Finished training after {} epochs \n".format(epoch))
+
         if self.save_best_model_prefix is not None:
                 print("The best model's architecture and weights (from epoch {0}) "
                                  'were saved to {1}.arch.json and {1}.weights.h5'.format(
                                      best_epoch, self.save_best_model_prefix))
 
+                logger.info("The best model's architecture and weights (from epoch {0}) "
+                                 'were saved to {1}.arch.json and {1}.weights.h5'.format(
+                                     best_epoch, self.save_best_model_prefix))
 
 
 
@@ -245,7 +262,7 @@ if __name__ == '__main__':
     extractors_dict={'data/genome_data_dir':genome_extractor,'data/dnase_data_dir':dnase_extractor}
 
     ##Create the logdir for saving models
-    logdir ='./logdir_SeqDnase_ZBTB33'
+    logdir ='./logdir_SeqDnase_ZBTB33_focal_loss'
 
     logdir=os.path.abspath(logdir)
     assert(not os.path.exists(logdir))

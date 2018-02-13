@@ -58,12 +58,61 @@ def focal_loss(y_true,logits):
     return -K.sum(alpha_wts * K.pow(1. - pt, gamma) * K.log(pt))
 
 
+
+def recall_at_precision_loss(labels,logits,lambda_):
+    alpha=0.9
+    
+    l_stop_grad=2*tf.stop_gradient(lambda_)-lambda_
+    pos = tf.boolean_mask(logits, tf.cast(labels, tf.bool))
+    neg = tf.boolean_mask(logits, ~tf.cast(labels, tf.bool))
+    total_pos=tf.cast(tf.reduce_sum(tf.shape(pos)),dtype=tf.float32)
+    #total_neg=tf.reduce_sum(tf.shape(neg))
+    pos_labels=tf.ones_like(pos,dtype=tf.float32)
+    neg_labels=tf.zeros_like(neg,dtype=tf.float32)
+    L_plus=tf.losses.hinge_loss(pos_labels,pos)
+    L_minus=tf.losses.hinge_loss(neg_labels,neg)
+    loss=(1+l_stop_grad)*L_plus+l_stop_grad*(alpha/(1-alpha))*L_minus -l_stop_grad*total_pos
+    return loss
+
+
+def roc_auc_score(y_true,logits):
+    """ ROC AUC Score.
+    Approximates the Area Under Curve score, using approximation based on
+    the Wilcoxon-Mann-Whitney U statistic.
+    Yan, L., Dodier, R., Mozer, M. C., & Wolniewicz, R. (2003).
+    Optimizing Classifier Performance via an Approximation to the Wilcoxon-Mann-Whitney Statistic.
+    Measures overall performance for a full range of threshold levels.
+    Arguments:
+        logits: `Tensor`. Predicted values.
+        logits: `Tensor` . Targets (labels), a probability distribution.
+    """
+    with tf.name_scope("RocAucScore"):
+
+        pos = tf.boolean_mask(logits, tf.cast(y_true, tf.bool))
+        neg = tf.boolean_mask(logits, ~tf.cast(y_true, tf.bool))
+
+        pos = tf.expand_dims(pos, 0)
+        neg = tf.expand_dims(neg, 1)
+
+        # original paper suggests performance is robust to exact parameter choice
+        gamma = 0.2
+        p     = 3
+
+        difference = tf.zeros_like(pos * neg) + pos - neg - gamma
+
+        masked = tf.boolean_mask(difference, difference < 0.0)
+
+        return tf.reduce_sum(tf.pow(-masked, p))
+
+    
+loss_dict={'cross_entropy':cross_entropy_loss,'focal_loss':focal_loss,'r@p_loss':recall_at_precision_loss,'roc_auc_loss':roc_auc_score}
+
 class ClassifierTrainer(object):
 
     def __init__(self,train_validation_dict,extractors_dict,logdir,batch_size=128,
                  epoch_size=100000, num_epochs=100,
                  early_stopping_metric='auPRC', early_stopping_patience=5,
-                 logger=None,save_best_model_prefix='SeqDnaseModel',visiblegpus='1'):
+                 logger=None,save_best_model_prefix='SeqDnaseModel',visiblegpus='1',loss='cross_entropy'):
         
         self.logdir=logdir
         self.batch_size = batch_size
@@ -82,6 +131,9 @@ class ClassifierTrainer(object):
         self.Model=SequenceDNAseClassifier()
         self.extractors_dict=extractors_dict
         self.save_best_model_prefix=save_best_model_prefix
+        self.loss=loss
+        assert self.loss in loss_dict.keys()
+        self.loss_function=loss_dict[self.loss]
         ##Define tensorflow session
         self.sess=create_tensorflow_session(visiblegpus=visiblegpus)
 
@@ -97,6 +149,7 @@ class ClassifierTrainer(object):
         self.logger.info('batch_size: {}'.format(self.batch_size))
         self.logger.info('Epoch Size: {}'.format(self.epoch_size))
         self.logger.info('Model Type: {}'.format(self.Model.__class__.__name__))
+        self.logger.info('Loss type used: {}'.format(self.loss))
 
         
 
@@ -142,11 +195,17 @@ class ClassifierTrainer(object):
 
 
         ###Create Tensorflow Graph
+        self.lambda_=tf.Variable(1.0,trainable='True')
         self.logits=self.Model.get_logits()
         labels_placeholder=tf.placeholder(tf.float32,shape=(None,1))
-        self.loss_op=focal_loss(labels_placeholder,self.logits)
+        if self.loss=='r@p_loss':
+            self.loss_op=self.loss_function(labels_placeholder,self.logits,self.lambda_)
+        else:
+            self.loss_op=self.loss_function(labels_placeholder,self.logits)    
+        
         self.optimizer=tf.train.AdamOptimizer(learning_rate=learning_rate)
         self.train_op=self.optimizer.minimize(self.loss_op)
+
 
         ##Loggint the optimizer information
         self.logger.info('optimizer: {}'.format(self.optimizer.__class__.__name__))
@@ -262,7 +321,7 @@ if __name__ == '__main__':
     extractors_dict={'data/genome_data_dir':genome_extractor,'data/dnase_data_dir':dnase_extractor}
 
     ##Create the logdir for saving models
-    logdir ='./logdir_SeqDnase_ZBTB33_focal_loss'
+    logdir ='./logdir_SeqDnase_ZBTB33_roc_auc_loss'
 
     logdir=os.path.abspath(logdir)
     assert(not os.path.exists(logdir))
@@ -277,7 +336,7 @@ if __name__ == '__main__':
     validation_intervals_file_dnase_regions_labels='/srv/scratch/manyu/TF_binding_tensorflow/data/validation_labels.npy'
     train_validation_dict_dnase={'train_data':train_intervals_file_dnase_regions,'train_labels':train_intervals_file_dnase_regions_labels,'validation_data':validation_intervals_file_dnase_regions,'validation_labels':validation_intervals_file_dnase_regions_labels}
         
-    Trainer=ClassifierTrainer(train_validation_dict_dnase,extractors_dict,logdir,logger=logger)
+    Trainer=ClassifierTrainer(train_validation_dict_dnase,extractors_dict,logdir,logger=logger,visiblegpus=1,batch_size=256,loss='roc_auc_loss')
     Trainer.train()
 
 

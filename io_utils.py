@@ -1,6 +1,8 @@
 from profilehooks import profile
 from itertools import cycle,izip
 import numpy as np
+import copy
+
 
 
 def batch_iterator(iterable,batch_size=128):
@@ -36,10 +38,12 @@ def generate_from_intervals(intervals, data_extractors_dict, batch_size=128, ind
     batch_size : int, optional
     indefinitely : bool, default: True
     """
+    ##Fixing the lenght of the intervals
+    interval_size = intervals[0].end-intervals[0].start
     shapes_dict={
-    "data/genome_data_dir":(batch_size,1000,4),
-    "data/dnase_data_dir":(batch_size,1000,1),
-    "data/methylation_data_dir":(batch_size,1000,1)}
+    "data/genome_data_dir":(batch_size,interval_size,4),
+    "data/dnase_data_dir":(batch_size,interval_size,1),
+    "data/methylation_data_dir":(batch_size,interval_size,1)}
     
     if indefinitely:
         batch_iterator_generator = infinite_batch_iter(intervals, batch_size)
@@ -61,7 +65,8 @@ def generate_from_intervals(intervals, data_extractors_dict, batch_size=128, ind
         try:
             for key in data_extractors_dict:
                 data_dict[key][:]=data_extractors_dict[key](batch).reshape(shapes_dict[key])
-            yield data_dict    
+            ##Check if this produces consistent results
+            yield copy.deepcopy(data_dict)    
                 
             
         except ValueError:
@@ -72,7 +77,7 @@ def generate_from_intervals(intervals, data_extractors_dict, batch_size=128, ind
                 #print (key,data.shape)
 
                 data_dict[key] = data_extractors_dict[key](batch).reshape((data.shape[0],shapes_dict[key][1],shapes_dict[key][2]))
-            yield data_dict    
+            yield copy.deepcopy(data_dict)    
 
 
 
@@ -82,9 +87,10 @@ def test_extractor_in_generator(intervals, extractor_dict, batch_size=128):
     Extracts data in bulk, then in streaming batches and checks its the same data.
     """
     from keras.utils.generic_utils import Progbar
+    interval_size = intervals[0].end-intervals[0].start
 
     X_in_memory = extractor_dict['data/genome_data_dir'](intervals)
-    Y_in_memory = extractor_dict['data/dnase_data_dir'](intervals).reshape((len(intervals),1000,1))
+    Y_in_memory = extractor_dict['data/dnase_data_dir'](intervals).reshape((len(intervals),interval_size,1))
     samples_per_epoch = len(intervals)
     batches_per_epoch = int(samples_per_epoch / batch_size) + 1
     

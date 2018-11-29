@@ -81,6 +81,62 @@ def generate_from_intervals(intervals, data_extractors_dict, batch_size=128, ind
 
 
 
+def generate_from_intervals_with_rev_comp(intervals, data_extractors_dict, batch_size=128, indefinitely=True):
+    """
+    Generates signals extracted on interval batches.
+    Parameters
+    ----------
+    intervals : Intervals BedTool (pybedtools list of intervals)
+    data_extractor_dict : dict of data source, and corresponding Genomelake Array Extractor
+    batch_size : int, optional
+    indefinitely : bool, default: True
+    """
+    ##Fixing the lenght of the intervals
+    interval_size = intervals[0].end-intervals[0].start
+    shapes_dict={
+    "data/genome_data_dir":(batch_size,interval_size,4),
+    "data/dnase_data_dir":(batch_size,interval_size,1),
+    "data/methylation_data_dir":(batch_size,interval_size,1)}
+    
+    if indefinitely:
+        batch_iterator_generator = infinite_batch_iter(intervals, batch_size)
+    else:
+        batch_iterator_generator = batch_iterator(intervals, batch_size)
+    
+    
+    
+    
+    ##Pre allocate memory for the data dictionary
+    data_dict={}
+    for key in data_extractors_dict:
+        assert key in shapes_dict.keys()
+        data_dict[key]=np.zeros((2*batch_size,shapes_dict[key][1],shapes_dict[key][2]))
+        
+        
+            
+    for batch in batch_iterator_generator:
+        try:
+            for key in data_extractors_dict:
+                extracted_arr = data_extractors_dict[key](batch).reshape(shapes_dict[key])
+                extracted_arr_rev_comp = extracted_arr[:,::-1,::-1]
+
+                data_dict[key][:]=np.vstack([extracted_arr,extracted_arr_rev_comp])
+            ##Check if this produces consistent results
+            yield copy.deepcopy(data_dict)    
+                
+            
+        except ValueError:
+            for key in data_extractors_dict:
+                # import  IPython
+                # IPython.embed()
+                data=data_extractors_dict[key](batch)
+                #print (key,data.shape)
+                extracted_arr = data_extractors_dict[key](batch).reshape((data.shape[0],shapes_dict[key][1],shapes_dict[key][2]))
+                extracted_arr_rev_comp = extracted_arr[:,::-1,::-1]
+                data_dict[key] = np.vstack([extracted_arr,extracted_arr_rev_comp])
+            yield copy.deepcopy(data_dict)    
+
+
 
 def test_extractor_in_generator(intervals, extractor_dict, batch_size=128):
     """
@@ -124,6 +180,16 @@ def generate_from_array(array, batch_size=128, indefinitely=True):
     for array_batch in batch_iterator_generator:
         yield np.stack(array_batch, axis=0)
 
+def generate_from_array_for_rev_comp_augmentation(array, batch_size=128, indefinitely=True):
+    """
+    Generates the array in batches.
+    """
+    if indefinitely:
+        batch_iterator_generator = infinite_batch_iter(array, batch_size)
+    else:
+        batch_iterator_generator = batch_iterator(array, batch_size)
+    for array_batch in batch_iterator_generator:
+        yield np.hstack([np.stack(array_batch, axis=0),np.stack(array_batch, axis=0)])
 
 
 
@@ -162,3 +228,37 @@ def generate_from_intervals_and_labels(intervals,labels,data_extractors_dict, ba
                           generate_from_array(labels, batch_size=batch_size, indefinitely=indefinitely))
     for batch in batch_generator:
         yield batch    
+
+def generate_from_Arrayintervals_and_labels(intervals,labels,data_extractors_dict, batch_size=128, indefinitely=True):
+    """
+    intervals: BedTool list of a set of genomic intervals 
+    labels: np.array
+    data_extractors_dict: dict of data type to genomelake extractor object for that kind of data 
+    for example: {'data/genome_data_dir':ArrayExtractor(genome_path)}
+
+    Generates batches of (inputs, labels) where inputs is a list of numpy arrays based on provided extractors.
+    """
+    batch_generator = izip(generate_from_intervals(intervals,data_extractors_dict,
+                                                  batch_size=batch_size,
+                                                  indefinitely=indefinitely),
+                          generate_from_array(labels, batch_size=batch_size, indefinitely=indefinitely))
+    for batch in batch_generator:
+        yield batch[0]['data/genome_data_dir'],batch[1]   
+
+
+def generate_from_intervals_and_labels_with_rev_comp_augmentation(intervals,labels,data_extractors_dict, batch_size=128, indefinitely=True):
+    """
+    intervals: BedTool list of a set of genomic intervals 
+    labels: np.array
+    data_extractors_dict: dict of data type to genomelake extractor object for that kind of data 
+    for example: {'data/genome_data_dir':ArrayExtractor(genome_path)}
+
+    Generates batches of (inputs, labels) where inputs is a list of numpy arrays based on provided extractors.
+    """
+    batch_generator = izip(generate_from_intervals_with_rev_comp(intervals,data_extractors_dict,
+                                                  batch_size=batch_size,
+                                                  indefinitely=indefinitely),
+                          generate_from_array_for_rev_comp_augmentation(labels, batch_size=batch_size, indefinitely=indefinitely))
+    for batch in batch_generator:
+        yield batch    
+
